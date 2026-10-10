@@ -6,6 +6,22 @@
 - 曾经存在过的 `AboutView.vue`（介绍页/示例代码）与 `stores/user.js`（模拟登录）已按用户要求删除，**不要以「方便演示」为由重新加回**。
 - 后续开发时业务代码应新加在 `src/views/`、`src/api/`、`src/stores/` 中，保持骨架文件干净。
 
+## 后端模块（server/）
+
+- 位置 `server/`，**FastAPI + uv** 的独立 Python 项目，与前端 `src/` 平级。不使用 npm，不用 `requirements.txt`。
+- 依赖唯一事实来源：`server/pyproject.toml`（声明）+ `server/uv.lock`（锁定）。改依赖一律用 `uv add` / `uv add --dev` / `uv remove`，禁止手改 `uv.lock`。
+- 开发依赖放 `[dependency-groups].dev`（PEP 735）。**测试客户端用 `httpx2`，不要换回 `httpx`**（starlette ≥1.7 已弃用 httpx，会报 StarletteDeprecationWarning）。
+- 包名是 `app`（src-layout：`server/src/app/`），导入路径 `app.xxx`。因包名 ≠ 项目名，`pyproject.toml` 中必须有：
+  ```toml
+  [tool.uv.build-backend]
+  module-name = "app"
+  module-root = "src"
+  ```
+  改包名或目录时必须同步改这里，否则 uv_build 构建失败。
+- 编写代码时的边界：接口实现放 `src/app/api/v1/endpoints/` 并在 `api/v1/router.py` 注册；配置项一律加在 `core/config.py` 的 `Settings` 里（环境变量 > `.env` > 默认值），不散落硬编码。
+- 命令统一加 `uv run` 前缀：`uv run tradinglog-server` / `uv run pytest` / `uv run ruff check .` / `uv sync`。跨环境复现用 `uv sync --frozen --no-dev`。
+- 后端默认端口 8000，前端 5173；CORS 白名单在 `Settings.cors_origins`。
+
 ## 技术栈与约定
 
 - Vue 3.5 + Vite 8 + Vue Router 5 + Pinia 4 + Naive UI 2.45，**纯 JavaScript**（不使用 TypeScript）。

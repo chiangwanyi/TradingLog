@@ -1,8 +1,11 @@
 # TradingLog
 
-基于 **Vue 3 + JavaScript + Naive UI** 的前端基础工程，已完成路由、状态管理、UI 按需引入与主题配置。
+前后端分离的全栈工程：
 
-工程保持最小化的初始状态：**不含任何业务逻辑、示例数据与演示功能**，仅保留项目结构与基础配置，可直接在此基础上开发。
+- **前端**：Vue 3 + JavaScript + Naive UI，已完成路由、状态管理、UI 按需引入与主题配置，位于仓库根目录。
+- **后端**：FastAPI + uv 的 Python 服务，位于 [`server/`](./server/README.md)。
+
+两端均保持最小化的初始状态：**不含任何业务逻辑、示例数据与演示功能**，仅保留项目结构与基础配置，可直接在此基础上开发。
 
 ---
 
@@ -17,19 +20,29 @@
 | UI | Naive UI 2.45 | 组件与组合函数全部按需引入 |
 | 语言 | JavaScript | 纯 JS，无 TypeScript |
 | 代码风格 | EditorConfig | 2 空格缩进、LF 换行 |
+| 后端框架 | FastAPI 0.143 | 异步 API，自动生成 OpenAPI/Swagger 文档 |
+| 后端运行时 | Python 3.13 | 由 uv 管理，无需手动安装 |
+| 后端依赖管理 | uv 0.12 | `pyproject.toml` 声明 + `uv.lock` 锁定 |
 
 ---
 
 ## 二、环境要求
 
+**前端：**
+
 - **Node.js** `^20.19.0 || >=22.12.0`（Vite 8 的最低要求，推荐 22 LTS）
 - **npm** `>=10`
+
+**后端：**
+
+- **uv** `>= 0.12`（Python 项目管理器，[安装说明](https://docs.astral.sh/uv/getting-started/installation/)）
+- **Python** 3.13 —— 由 uv 自动下载管理，无需手动安装
 
 查看当前版本：
 
 ```bash
-node -v
-npm -v
+node -v && npm -v
+uv --version
 ```
 
 ---
@@ -55,6 +68,24 @@ npm run preview
 
 > 若 `npm install` 较慢，可切换镜像源：
 > `npm config set registry https://registry.npmmirror.com`
+
+### 后端（server/）
+
+后端是独立的 Python 项目，用 [uv](https://docs.astral.sh/uv/) 管理，**不使用 npm**：
+
+```bash
+cd server
+
+uv sync                      # 按 uv.lock 安装依赖（首次会自动创建 .venv）
+
+cp .env.example .env         # 可选：按需修改配置
+
+uv run tradinglog-server     # 启动服务（等价于 uvicorn app.main:app --reload）
+uv run pytest                # 跑测试
+```
+
+启动后接口为 http://127.0.0.1:8000/api/v1/health ，交互文档在 http://127.0.0.1:8000/docs 。
+依赖管理与配置方式的完整说明见 [`server/README.md`](./server/README.md)。
 
 ---
 
@@ -92,6 +123,25 @@ TradingLog/
    └─ styles/
       └─ index.css            # 全局重置、过渡动画、通用类
 ```
+
+### 后端模块（server/）
+
+```
+server/
+├─ pyproject.toml             # 依赖声明 + 工具配置（唯一配置入口）
+├─ uv.lock                    # 依赖锁文件，保证可复现安装
+├─ .python-version            # 锁定的 Python 版本（3.13）
+├─ .env.example               # 环境变量模板
+├─ src/
+│  └─ app/                    # 应用包（导入路径 app.xxx）
+│     ├─ main.py              # 应用工厂 create_app() + ASGI 实例
+│     ├─ __main__.py          # 命令行入口
+│     ├─ core/config.py       # 配置中心（pydantic-settings）
+│     └─ api/v1/              # 路由汇总与各业务模块接口
+└─ tests/                     # 后端测试
+```
+
+完整说明见 [`server/README.md`](./server/README.md)。
 
 ---
 

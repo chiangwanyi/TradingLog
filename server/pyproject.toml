@@ -1,0 +1,47 @@
+[project]
+name = "tradinglog-server"
+version = "0.1.0"
+description = "TradingLog 后端服务（FastAPI + uv）"
+readme = "README.md"
+authors = [
+    { name = "jiangwanyi", email = "jiangwane@qq.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.143.0",
+    "pydantic-settings>=2.15.0",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+tradinglog-server = "app.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
+
+# uv_build 默认按项目名推导包名（tradinglog_server），
+# 这里显式指向 src/app，因此导入路径是 `app.xxx`。
+[tool.uv.build-backend]
+module-name = "app"
+module-root = "src"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.13.1",
+    "pytest>=9.1.1",
+    "ruff>=0.17.0",
+]

@@ -1,0 +1,23 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# ---- 工具缓存 ----
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ---- 虚拟环境（由 uv 管理，不入库）----
+.venv/
+
+# ---- 环境变量：只提交模板，不提交真实值 ----
+.env
+.env.*
+!.env.example
