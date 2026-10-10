@@ -10,3 +10,9 @@ trim_trailing_whitespace = true
 
 [*.md]
 trim_trailing_whitespace = false
+
+# Windows 批处理必须用 CRLF；cmd.exe 解析 LF-only 的 .cmd 时 goto/label 可能出错。
+# 另外 .cmd 请保持纯 ASCII —— cmd.exe 解析含多字节字符的批处理时会丢字符。
+[*.cmd]
+end_of_line = crlf
+charset = ascii

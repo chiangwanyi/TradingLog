@@ -219,6 +219,56 @@ def test_annotation_requires_image_in_same_album(client: TestClient) -> None:
     assert response.status_code == 400
 
 
+def test_annotation_color_defaults_to_empty_and_roundtrips(client: TestClient) -> None:
+    """颜色字段：不传即空串（回落默认色），传大写 hex 统一存小写。"""
+    album = create_album(client)
+    image = upload(client, album["id"], ["1.png"])["saved"][0]
+    album_id = album["id"]
+
+    plain = client.post(
+        f"{API}/albums/{album_id}/annotations",
+        json={"image_id": image["id"], "kind": "point", "x": 0.2, "y": 0.2},
+    )
+    assert plain.status_code == 201
+    assert plain.json()["color"] == ""
+
+    colored = client.post(
+        f"{API}/albums/{album_id}/annotations",
+        json={"image_id": image["id"], "kind": "point", "x": 0.4, "y": 0.4, "color": "#3B82F6"},
+    )
+    assert colored.status_code == 201
+    assert colored.json()["color"] == "#3b82f6"
+
+    annotation_id = colored.json()["id"]
+    updated = client.patch(f"{API}/annotations/{annotation_id}", json={"color": "#EF4444"})
+    assert updated.status_code == 200
+    assert updated.json()["color"] == "#ef4444"
+
+    # 改颜色不应影响文字说明，反之亦然
+    assert updated.json()["text"] == ""
+    assert (
+        client.patch(f"{API}/annotations/{annotation_id}", json={"text": "破位"}).json()["color"]
+        == "#ef4444"
+    )
+
+    # 详情接口里也要带着颜色
+    detail = client.get(f"{API}/albums/{album_id}").json()["images"][0]["annotations"]
+    assert [item["color"] for item in detail] == ["", "#ef4444"]
+
+
+def test_annotation_rejects_invalid_color(client: TestClient) -> None:
+    album = create_album(client)
+    image = upload(client, album["id"], ["1.png"])["saved"][0]
+    album_id = album["id"]
+
+    for bad in ("orange", "#fff", "#gggggg", "rgb(1,2,3)"):
+        response = client.post(
+            f"{API}/albums/{album_id}/annotations",
+            json={"image_id": image["id"], "kind": "point", "x": 0.1, "y": 0.1, "color": bad},
+        )
+        assert response.status_code == 422, bad
+
+
 def test_update_and_delete_annotation_recompacts_sequence(client: TestClient) -> None:
     album = create_album(client)
     image = upload(client, album["id"], ["1.png"])["saved"][0]

@@ -14,6 +14,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+# 批注自定义颜色统一用 `#rrggbb`（6 位十六进制，大小写都接受，入库前统一转小写）。
+# 允许空串：代表「没有指定颜色」，由前端回落到默认强调色 —— 老数据无需回填。
+HEX_COLOR = r"#[0-9a-fA-F]{6}"
+COLOR_PATTERN = rf"^({HEX_COLOR})?$"
+
 
 class AnnotationCreate(BaseModel):
     image_id: str = Field(..., description="所在图片")
@@ -23,12 +28,14 @@ class AnnotationCreate(BaseModel):
     w: float = Field(0, ge=-1, le=1, description="矩形相对起点的横向跨度（带符号），点批注为 0")
     h: float = Field(0, ge=-1, le=1, description="矩形相对起点的纵向跨度（带符号），点批注为 0")
     text: str = Field("", max_length=2000, description="文字说明")
+    color: str = Field("", pattern=COLOR_PATTERN, description="自定义颜色 #rrggbb，空串为默认色")
 
 
 class AnnotationUpdate(BaseModel):
-    """更新批注：主要用于改文字说明；也允许微调几何。"""
+    """更新批注：主要用于改文字说明与颜色；也允许微调几何。"""
 
     text: str | None = Field(None, max_length=2000)
+    color: str | None = Field(None, pattern=COLOR_PATTERN, description="自定义颜色 #rrggbb")
     x: float | None = Field(None, ge=0, le=1)
     y: float | None = Field(None, ge=0, le=1)
     w: float | None = Field(None, ge=-1, le=1)
@@ -47,4 +54,6 @@ class AnnotationRead(BaseModel):
     w: float
     h: float
     text: str = ""
+    # 空串表示使用默认强调色
+    color: str = ""
     created_at: datetime

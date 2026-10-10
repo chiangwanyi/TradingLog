@@ -23,7 +23,9 @@ import {
   IconUpload,
 } from '@/components/icons'
 import { albumApi } from '@/api'
+import { usePreferencesStore } from '@/stores'
 import { formatDateTime } from '@/utils/datetime'
+import { annotationColorVars, normalizeAnnotationColor } from '@/utils/color'
 
 defineOptions({ name: 'AlbumDetailView' })
 
@@ -31,6 +33,7 @@ const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
+const preferencesStore = usePreferencesStore()
 
 const albumId = computed(() => route.params.albumId)
 
@@ -43,7 +46,14 @@ const currentIndex = ref(0)
 const mode = ref('view')
 /** 'point' 单击落点；'rect' 拖拽画框 */
 const tool = ref('point')
+/** 当前高亮的批注：只影响观感，不决定是否弹出编辑框 */
 const selectedId = ref(null)
+/** 正在编辑说明的批注；null 表示编辑框关闭 */
+const editingId = ref(null)
+/** 从批注清单跳过来时，让对应的序号图标呼吸闪烁一次以引导视线 */
+const pulseId = ref(null)
+const pulseToken = ref(0)
+let pulseTimer = null
 
 const panelVisible = ref(true)
 const editVisible = ref(false)
@@ -112,6 +122,7 @@ watch(
   () => {
     currentIndex.value = 0
     selectedId.value = null
+    editingId.value = null
     mode.value = 'view'
     load()
   },
@@ -124,15 +135,39 @@ function goTo(index) {
   if (index < 0 || index >= images.value.length || index === currentIndex.value) return
   currentIndex.value = index
   selectedId.value = null
+  editingId.value = null
 }
 
 const prev = () => goTo(currentIndex.value - 1)
 const next = () => goTo(currentIndex.value + 1)
 
-/** 从批注清单跳到某条批注：切到它所在的图片并选中 */
+/**
+ * 从批注清单点一条批注：切到它所在的图片、把它高亮、并让图标呼吸闪烁一次。
+ * **不打开编辑框** —— 这一步的意图是「带我看一眼在哪」，而不是「我要改它」。
+ * 想改内容请点行内悬浮出来的「修改」按钮（见 openEditor）。
+ */
 function focusAnnotation(item) {
   currentIndex.value = item.imageIndex
   selectedId.value = item.id
+  editingId.value = null
+  pulse(item.id)
+}
+
+function pulse(id) {
+  pulseId.value = id
+  pulseToken.value += 1
+  clearTimeout(pulseTimer)
+  // 闪烁动画由 ImageStage 自己控制时长，这里稍晚一点清空，保证动画能完整播完
+  pulseTimer = setTimeout(() => {
+    pulseId.value = null
+  }, 2000)
+}
+
+/** 打开某条批注的修改框（清单行内的「修改」按钮 / 图片上的序号图标走这里） */
+function openEditor(item) {
+  currentIndex.value = item.imageIndex
+  selectedId.value = item.id
+  editingId.value = item.id
 }
 
 function onKeydown(event) {
@@ -149,6 +184,7 @@ function onKeydown(event) {
     next()
   } else if (event.key === 'Escape') {
     selectedId.value = null
+    editingId.value = null
   }
 }
 
@@ -263,6 +299,8 @@ async function handleCreate(payload) {
   try {
     const created = await albumApi.createAnnotation(albumId.value, {
       image_id: image.id,
+      // 新建批注沿用上次用过的颜色，省得每次都重新挑
+      color: preferencesStore.preferredAnnotationColor,
       ...payload,
     })
     // 按 id 重新定位：等待接口返回期间用户可能已经切换了图片
@@ -270,18 +308,27 @@ async function handleCreate(payload) {
     if (!target) return
     if (!Array.isArray(target.annotations)) target.annotations = []
     target.annotations.push(created)
-    // 选中新批注，ImageStage 会随即弹出说明编辑框
     selectedId.value = created.id
+    // 建完立刻打开说明编辑框，方便马上补文字与颜色（输入框会自动聚焦）
+    editingId.value = created.id
   } catch (error) {
     message.error(error.message)
   }
 }
 
-async function handleUpdateText(id, text) {
+async function handleUpdate(id, payload) {
+  const target = findAnnotation(id)
+  // 按「实际生效的颜色」比较：老数据的 color 是空串（表示未指定，渲染为默认色），
+  // 用户只改文字时不该被误判成「换过颜色」，否则默认色会平白挤进调色板。
+  const colorChanged =
+    Boolean(target) &&
+    normalizeAnnotationColor(payload.color) !== normalizeAnnotationColor(target.color)
+
   try {
-    const updated = await albumApi.updateAnnotation(id, { text })
-    const target = findAnnotation(id)
+    const updated = await albumApi.updateAnnotation(id, payload)
     if (target) Object.assign(target, updated)
+    if (colorChanged) preferencesStore.rememberColor(updated.color)
+    editingId.value = null
     message.success('批注已保存')
   } catch (error) {
     message.error(error.message)
@@ -299,6 +346,7 @@ function handleRemove(id) {
         await albumApi.deleteAnnotation(id)
         // 与后端保持一致：删完把整册序号压实为 1..N
         removeAndRenumber(id)
+        if (editingId.value === id) editingId.value = null
         message.success('批注已删除')
       } catch (error) {
         message.error(error.message)
@@ -363,11 +411,14 @@ function confirmDeleteAlbum() {
 onMounted(() => {
   window.addEventListener('paste', onPaste)
   window.addEventListener('keydown', onKeydown)
+  // 调色板的「最近使用」存在后端，进页面时拉一次
+  preferencesStore.loadRecentColors()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('paste', onPaste)
   window.removeEventListener('keydown', onKeydown)
+  clearTimeout(pulseTimer)
 })
 </script>
 
@@ -474,18 +525,22 @@ onBeforeUnmount(() => {
     <div class="detail__body">
       <div class="detail__main">
         <ImageStage
+          v-model:editing-id="editingId"
           :image="currentImage"
           :annotations="currentAnnotations"
           :mode="mode"
           :tool="tool"
           :selected-id="selectedId"
+          :pulse-id="pulseId"
+          :pulse-token="pulseToken"
+          :recent-colors="preferencesStore.recentAnnotationColors"
           :has-prev="currentIndex > 0"
           :has-next="currentIndex < images.length - 1"
           :position-label="images.length ? `${currentIndex + 1} / ${images.length}` : ''"
           :loading="loading"
           @create="handleCreate"
           @select="selectedId = $event"
-          @update-text="handleUpdateText"
+          @update="handleUpdate"
           @remove="handleRemove"
           @prev="prev"
           @next="next"
@@ -528,7 +583,9 @@ onBeforeUnmount(() => {
             </template>
           </n-button>
         </div>
-        <p class="aside__hint">序号在同一图集内跨所有图片统一编号</p>
+        <p class="aside__hint">
+          序号在同一图集内跨所有图片统一编号；点一行定位到对应截图，悬浮显示「修改」按钮
+        </p>
 
         <n-scrollbar class="aside__scroll">
           <n-empty
@@ -538,15 +595,22 @@ onBeforeUnmount(() => {
             style="padding: 32px 0"
           />
 
-          <button
+          <div
             v-for="item in annotationList"
             :key="item.id"
-            type="button"
             class="anno-item"
             :class="{ 'is-active': item.id === selectedId }"
+            role="button"
+            tabindex="0"
+            :style="annotationColorVars(item.color)"
+            :title="item.text || `第 ${item.seq} 条批注`"
             @click="focusAnnotation(item)"
+            @keydown.enter.prevent="focusAnnotation(item)"
+            @keydown.space.prevent="focusAnnotation(item)"
           >
-            <span class="anno-item__seq">{{ item.seq }}</span>
+            <span class="anno-item__seq">
+              {{ item.seq }}
+            </span>
             <span class="anno-item__body">
               <span class="anno-item__text" :class="{ 'is-empty': !item.text }">
                 {{ item.text || '（未填写说明）' }}
@@ -556,7 +620,22 @@ onBeforeUnmount(() => {
                 {{ item.kind === 'point' ? '点批注' : '矩形批注' }}
               </span>
             </span>
-          </button>
+
+            <!-- 悬浮（或键盘聚焦）时才出现，避免整列都是按钮干扰浏览 -->
+            <span class="anno-item__edit">
+              <n-button
+                quaternary
+                circle
+                size="tiny"
+                title="修改这条批注"
+                @click.stop="openEditor(item)"
+              >
+                <template #icon>
+                  <component :is="IconPen" />
+                </template>
+              </n-button>
+            </span>
+          </div>
         </n-scrollbar>
       </aside>
     </div>
@@ -690,7 +769,7 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   gap: 9px;
   width: 100%;
-  padding: 9px 14px;
+  padding: 9px 8px 9px 14px;
   border: none;
   border-left: 3px solid transparent;
   background: transparent;
@@ -705,9 +784,26 @@ onBeforeUnmount(() => {
   background: rgba(128, 128, 128, 0.1);
 }
 
+.anno-item:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: -2px;
+}
+
 .anno-item.is-active {
-  border-left-color: var(--anno-accent);
-  background: var(--anno-accent-soft);
+  border-left-color: var(--anno-color, var(--anno-accent));
+  background: var(--anno-color-soft, var(--anno-accent-soft));
+}
+
+/* 修改按钮只在悬浮 / 键盘聚焦时出现，平时整列保持干净 */
+.anno-item__edit {
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.anno-item:hover .anno-item__edit,
+.anno-item:focus-within .anno-item__edit {
+  opacity: 1;
 }
 
 .anno-item__seq {
@@ -719,14 +815,15 @@ onBeforeUnmount(() => {
   height: 20px;
   padding: 0 5px;
   border-radius: 6px;
-  background: var(--anno-accent);
-  color: #fff;
+  background: var(--anno-color, var(--anno-accent));
+  color: var(--anno-color-on, #fff);
   font-size: 11px;
   font-weight: 700;
 }
 
 .anno-item__body {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 3px;
   min-width: 0;

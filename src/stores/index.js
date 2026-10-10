@@ -5,5 +5,6 @@ export const pinia = createPinia()
 
 export * from './app'
 export * from './album'
+export * from './preferences'
 
 export default pinia

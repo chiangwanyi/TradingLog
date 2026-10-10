@@ -58,7 +58,35 @@ uv --version
 
 ## 三、安装与运行
 
-### 前端
+### 一键启动（推荐，Windows）
+
+项目根目录的 `start_dev.cmd` 双击即可同时拉起后端和前端：
+
+```bat
+start_dev.cmd
+```
+
+| 环节 | 行为 |
+| --- | --- |
+| 结构检查 | 找不到 `package.json` / `server\pyproject.toml` 时明确报错（脚本放错目录了） |
+| 工具检查 | 找不到 `uv` / `npm` 时给出安装地址后暂停，窗口不会一闪而过 |
+| 依赖自检 | 首次运行若缺 `node_modules` / `server\.venv`，自动执行 `npm install` / `uv sync` |
+| 端口提示 | 8000 / 5173 已被占用时给出警告（多半是上次的窗口没关） |
+| 后端 | 新窗口运行 `uv run tradinglog-server`，默认开启热重载 |
+| 前端 | 新窗口运行 `npm run dev` |
+| 停止 | 关掉那两个新窗口即可（或在窗口里按 `Ctrl+C`） |
+
+脚本开头有两个开关，按需改：
+
+```bat
+set "BACKEND_RELOAD=1"   rem 后端热重载：1 = 开，0 = 关
+set "OPEN_BROWSER=0"     rem 启动后自动打开浏览器：1 = 开，0 = 关
+```
+
+> ⚠️ **`start_dev.cmd` 必须保持「纯 ASCII + CRLF 换行」**，`.editorconfig` 里已为 `[*.cmd]` 固定住这两点。
+> 原因：cmd.exe 解析批处理时会混用「字节偏移」和「字符计数」，文件里出现多字节（中文）字符后，某些行的开头会被悄悄吞掉几个字符，表现为某行突然报「不是内部或外部命令」。所以脚本内的提示信息刻意用英文，中文说明放在这里。
+
+### 前端（手动）
 
 ```bash
 cd TradingLog
@@ -72,7 +100,7 @@ npm run preview      # 预览构建产物 http://localhost:4173
 > 若 `npm install` 较慢，可切换镜像源：
 > `npm config set registry https://registry.npmmirror.com`
 
-### 后端（server/）
+### 后端（server/，手动）
 
 后端是独立的 Python 项目，用 [uv](https://docs.astral.sh/uv/) 管理，**不使用 npm**：
 
@@ -86,6 +114,7 @@ uv run pytest                # 跑测试
 ```
 
 > **两个服务都要启动**，相册功能才能正常使用。前端在开发环境下把 `/api` 请求代理到 `127.0.0.1:8000`（见第五节第 6 条），因此浏览器只需访问 http://localhost:5173 。
+> 懒得开两个终端就直接双击根目录的 `start_dev.cmd`。
 
 启动后：
 
@@ -104,7 +133,8 @@ TradingLog/
 ├─ index.html                 # 应用入口 HTML
 ├─ vite.config.js             # Vite 配置：别名、按需引入、开发服务器与 /api 代理
 ├─ jsconfig.json              # 编辑器路径别名提示（@ -> src）
-├─ .editorconfig              # 统一代码风格
+├─ .editorconfig              # 统一代码风格（[*.cmd] 固定 ASCII + CRLF）
+├─ start_dev.cmd              # 一键启动脚本：同时拉起后端与前端（Windows）
 ├─ public/
 │  └─ favicon.svg
 ├─ src/
@@ -113,14 +143,16 @@ TradingLog/
 │  ├─ api/                    # 接口层
 │  │  ├─ index.js             # 统一导出
 │  │  ├─ request.js           # fetch 封装：拼前缀、JSON 序列化、错误归一化
-│  │  └─ album.js             # 交易相册相关接口
+│  │  ├─ album.js             # 交易相册相关接口
+│  │  └─ preference.js        # UI 偏好接口（批注调色板的最近颜色）
 │  ├─ router/
 │  │  ├─ index.js             # 创建路由实例、全局守卫、滚动行为
 │  │  └─ routes.js            # 路由表 + 侧边栏菜单配置
 │  ├─ stores/                 # Pinia 状态管理
 │  │  ├─ index.js             # pinia 实例与统一导出
 │  │  ├─ app.js               # 主题模式、侧边栏折叠
-│  │  └─ album.js             # 图集列表
+│  │  ├─ album.js             # 图集列表
+│  │  └─ preferences.js       # 批注调色板的最近使用颜色
 │  ├─ theme/
 │  │  └─ index.js             # 品牌色与深浅主题变量覆盖
 │  ├─ layouts/
@@ -139,7 +171,8 @@ TradingLog/
 │  │     └─ ThumbnailStrip.vue   # 底部缩略图条
 │  ├─ utils/
 │  │  ├─ naive.js             # 全局 Naive UI API 注册中心
-│  │  └─ datetime.js          # 时间格式化与本地 ISO 互转
+│  │  ├─ datetime.js          # 时间格式化与本地 ISO 互转
+│  │  └─ color.js             # 批注颜色：预设色盘、hex 解析、对比色、CSS 变量
 │  └─ styles/
 │     └─ index.css            # 全局重置、主题变量、过渡动画、通用类
 └─ server/                    # 后端服务，详见 server/README.md
@@ -184,7 +217,33 @@ TradingLog/
 - **点批注**：左键单击图片任意位置 → 在该处落下圆形序号图标，随即弹出说明编辑框。
 - **矩形批注**：左键按住拖动绘制矩形 → 序号图标落在**单击起点**，随即弹出说明编辑框。
 
-序号图标可点击选中，编辑框贴图标显示（靠近右/下边缘会自动翻转或夹紧，不会被裁掉），可修改文字或删除。删除批注后全册序号自动重排。
+编辑框贴图标显示（靠近右/下边缘会自动翻转或夹紧，不会被裁掉），**打开后光标自动聚焦到说明输入框**并把光标置于文末，可以直接续写。可修改文字、颜色或删除批注。删除批注后全册序号自动重排。
+
+#### 4.1 批注颜色
+
+编辑框里提供三种取色方式，选中的颜色**保存后**生效（图标底色、矩形描边与清单里的序号色块会同步变化）：
+
+| 方式 | 说明 |
+| --- | --- |
+| 预设色盘 | 12 个内置颜色，挑的都是浅底 / 深底 K 线图上都醒目的颜色 |
+| 最近使用 | 自动记录用过的颜色，**存在后端数据库**，换浏览器 / 清缓存后仍在 |
+| 自定义 | 取色器面板，可选任意颜色（含光谱、色相条与 hex 输入） |
+
+实现要点：
+
+- 颜色以 `#rrggbb` 存在 `annotations.color`；**空串表示「未指定」，回落默认琥珀色** —— 因此加这个字段之前的老批注无需回填，照常显示。
+- 新建批注会**沿用最近用过的颜色**，省得每次都重新挑。
+- 「最近使用」的去重、排序与上限（12 个）全部由后端 `services/preferences.py` 负责，前端只做乐观更新。
+- 序号数字的前景色会按底色亮度自动切换深浅（浅色批注配深字），否则白色 / 黄色批注上的序号会糊在色块里看不见。
+
+#### 4.2 批注清单的交互
+
+右侧清单里**选中**和**编辑**是两件事，刻意分开：
+
+- **点一行** → 切到该批注所在的截图、把它高亮，并让图片上的序号图标**呼吸闪烁两次**引导视线；**不会弹出编辑框**（这一步的意图是「带我看一眼在哪」，不是「我要改它」）。
+- **鼠标悬浮到行上** → 该行右侧浮出「修改」按钮，点它才打开编辑框。
+
+实现上由 `AlbumDetailView` 持有两个状态：`selectedId`（只影响高亮）与 `editingId`（决定编辑框是否打开），`ImageStage` 只按这两个值渲染并回报意图。
 
 ### 5. 坐标系设计（关键实现）
 
@@ -201,11 +260,13 @@ TradingLog/
 
 ```
 server/data/
-├─ tradinglog.db                     # albums / images / annotations 三张表
+├─ tradinglog.db                     # albums / images / annotations / preferences 四张表
 └─ uploads/<album_id>/
    ├─ <image_id>.<ext>               # 原图（按上传字节原样保存，不二次编码）
    └─ <image_id>.thumb.webp          # 预览缩略图（最长边 480px）
 ```
+
+`preferences` 是通用键值表，存纯 UI 偏好（目前是批注调色板的最近使用颜色）。表结构变更走 `core/db.py` 里的轻量迁移，新增列只改 `SCHEMA` 与 `_ADDED_COLUMNS` 两处，老库会自动补列。
 
 删除图集或图片时，磁盘文件与数据库记录（含批注）会一并清理。
 
@@ -290,6 +351,8 @@ server: {
 
 **新增一个 store：** 在 `src/stores/` 下新建文件，用 `defineStore` 定义后，从 `src/stores/index.js` 导出即可。
 
+> ⚠️ **store 不会被自动导入**：`unplugin-auto-import` 只覆盖 `vue` / `vue-router` 与 Naive UI 的几个组合函数，`useXxxStore` 必须手写 `import { useXxxStore } from '@/stores'`。漏写时**生产构建不会报错**（`import` 之外的未定义标识符只在运行时暴露），但页面会白屏并抛出 `ReferenceError: useXxxStore is not defined` —— 所以改完前端一定要在浏览器里真跑一次，光看 `npm run build` 通过是不够的。
+
 **新增一个接口层：** 在 `src/api/` 下按模块建文件，统一走 `request.js`，错误消息由调用方配合 `useMessage()` 提示。
 
 **新增一个后端模块：** 见 [`server/README.md`](./server/README.md) 第九节。
@@ -301,9 +364,13 @@ server: {
 | 问题 | 原因与解决 |
 | --- | --- |
 | `n-xxx` 组件不生效 / 控制台报未知组件 | 确认 `vite.config.js` 中已配置 `Components({ resolvers: [NaiveUiResolver()] })`，修改配置后需重启 dev server |
+| 页面白屏、控制台 `xxx is not defined` | 多半是漏了手写 `import`（store / 工具函数不在自动导入范围内）。注意这种情况 `npm run build` 仍会通过 |
 | 调用 `useMessage()` 报错 `No outer <n-message-provider />` | 该组合函数只能在 Provider 后代中调用；跨组件场景请改用 `getNaiveApi()` |
 | 编辑器不识别 `@/` 别名 | 确认 `jsconfig.json` 存在且重启编辑器（VS Code 需 Volar 插件） |
 | Node 版本报错 `EBADENGINE` | 升级到 Node 20.19+ / 22.12+ 后重新 `npm install` |
-| 相册页一直转圈 / 报「请求失败」 | 后端没启动。执行 `cd server && uv run tradinglog-server` |
+| 相册页一直转圈 / 报「请求失败」 | 后端没启动。执行 `cd server && uv run tradinglog-server`，或直接双击 `start_dev.cmd` |
 | 上传大图失败 | 单张上限 20MB，可在 `.env` 中调 `MAX_IMAGE_BYTES` |
 | 图片在别的电脑上看不到 | 数据存在后端 `server/data/` 下（已忽略版本库），需要迁移时整体拷贝该目录 |
+| 改了后端代码但接口行为没变 | 未开热重载时 uvicorn 不会自动重载，需要重启进程。用 `start_dev.cmd` 启动默认已开启（`BACKEND_RELOAD=1`） |
+| `start_dev.cmd` 里某行报「不是内部或外部命令」 | 批处理被写入了非 ASCII 字符（见第三节警告）。把提示信息改回英文即可 |
+| 双击 `start_dev.cmd` 后服务没起来 | 先看那两个新窗口里的报错。若提示端口被占用，关掉上一次的窗口再试 |

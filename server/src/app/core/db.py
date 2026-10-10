@@ -1,9 +1,9 @@
 """SQLite 存储层。
 
-只做两件事：管理连接、建立表结构。业务读写逻辑放在 `app.services` 下。
+只做三件事：管理连接、建立表结构、做轻量列迁移。业务读写逻辑放在 `app.services` 下。
 
 为什么用标准库 `sqlite3` 而不用 ORM：
-本项目的元数据只有三张表、查询也很简单，标准库足以胜任，且不引入额外依赖。
+本项目的元数据只有几张表、查询也很简单，标准库足以胜任，且不引入额外依赖。
 图片本身以文件形式落盘（见 `app.services.images`），数据库只存元数据。
 """
 
@@ -53,19 +53,49 @@ CREATE TABLE IF NOT EXISTS annotations (
     w          REAL NOT NULL DEFAULT 0,
     h          REAL NOT NULL DEFAULT 0,
     text       TEXT NOT NULL DEFAULT '',
+    -- 批注自定义颜色（#rrggbb 小写）。空串代表「未指定」，由前端回落到默认强调色，
+    -- 这样老数据不需要回填也能正常显示。
+    color      TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_annotations_album ON annotations(album_id, seq);
 CREATE INDEX IF NOT EXISTS idx_annotations_image ON annotations(image_id, seq);
+
+-- 轻量键值偏好表：目前用于保存批注调色板的「最近使用颜色」等纯 UI 偏好。
+-- 用 key/value + JSON 字符串，避免为几个 UI 偏好单独建结构化表。
+CREATE TABLE IF NOT EXISTS preferences (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
 """
+
+# 给已存在的旧库补上后加的列。
+# 表结构以 SCHEMA 为唯一事实来源，但 CREATE TABLE IF NOT EXISTS 不会修改已有表，
+# 所以这里按「缺哪列补哪列」做幂等迁移（列少、不值得引入迁移框架）。
+_ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "annotations": {"color": "TEXT NOT NULL DEFAULT ''"},
+}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """幂等地补齐后加的列；已存在则跳过。"""
+    for table, columns in _ADDED_COLUMNS.items():
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if not existing:
+            continue  # 表还不存在，SCHEMA 会创建出完整结构
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
 
 def init_db() -> None:
-    """建表（幂等），并确保数据目录存在。应用启动时调用一次。"""
+    """建表（幂等）、补列，并确保数据目录存在。应用启动时调用一次。"""
     settings = get_settings()
     settings.ensure_dirs()
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
 
 
 @contextmanager

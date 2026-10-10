@@ -41,16 +41,18 @@ server/
 │     ├─ main.py            # 应用工厂 create_app()、lifespan、异常处理器
 │     ├─ core/
 │     │  ├─ config.py       # 基于 pydantic-settings 的配置中心
-│     │  ├─ db.py           # SQLite 连接与建表（三张表的 schema 集中在此）
+│     │  ├─ db.py           # SQLite 连接、建表、轻量列迁移
 │     │  └─ errors.py       # 领域异常（NotFound / Validation）
 │     ├─ schemas/           # Pydantic 请求 / 响应模型
 │     │  ├─ album.py
 │     │  ├─ image.py
-│     │  └─ annotation.py
+│     │  ├─ annotation.py
+│     │  └─ preference.py   # 批注调色板等 UI 偏好
 │     ├─ services/          # 业务逻辑（不依赖 FastAPI，可单独测试）
 │     │  ├─ albums.py       #   图集 CRUD
 │     │  ├─ images.py       #   图片落盘、缩略图生成、元数据
-│     │  ├─ annotations.py  #   批注 CRUD 与序号压实
+│     │  ├─ annotations.py  #   批注 CRUD、颜色归一化与序号压实
+│     │  ├─ preferences.py  #   键值偏好读写（最近使用的批注颜色）
 │     │  └─ common.py       #   now_iso / truncate_to_minute 等
 │     ├─ api/
 │     │  └─ v1/
@@ -59,11 +61,14 @@ server/
 │     │        ├─ health.py       # 健康检查
 │     │        ├─ albums.py       # 图集接口 + 图片上传
 │     │        ├─ images.py       # 原图 / 缩略图读取、图片删除
-│     │        └─ annotations.py  # 批注接口
+│     │        ├─ annotations.py  # 批注接口
+│     │        └─ preferences.py  # UI 偏好接口
 └─ tests/
    ├─ conftest.py           # pytest 共享夹具（隔离的临时数据目录）
    ├─ test_health.py        # 健康检查冒烟测试
-   └─ test_albums.py        # 相册全链路测试
+   ├─ test_albums.py        # 相册全链路测试（含批注颜色）
+   ├─ test_preferences.py   # 最近使用颜色的去重 / 截断
+   └─ test_db_migration.py  # 给旧库补列的迁移测试
 ```
 
 **分层约定：**
@@ -198,7 +203,8 @@ server/data/
 | --- | --- | --- |
 | `albums` | `id`, `symbol`, `trade_time`, `title`, `note`, `created_at`, `updated_at` | 图集。`trade_time` 精确到分钟，列表按它倒序 |
 | `images` | `id`, `album_id`, `original_name`, `stored_name`, `thumb_name`, `mime`, `size`, `width`, `height`, `created_at` | 图片。按 `created_at` 升序即上传顺序 |
-| `annotations` | `id`, `album_id`, `image_id`, `kind`, `seq`, `x`, `y`, `w`, `h`, `text`, `created_at` | 批注 |
+| `annotations` | `id`, `album_id`, `image_id`, `kind`, `seq`, `x`, `y`, `w`, `h`, `text`, `color`, `created_at` | 批注 |
+| `preferences` | `key`, `value`, `updated_at` | 纯 UI 偏好的键值存储（JSON 字符串），目前存批注调色板的「最近使用颜色」 |
 
 设计要点：
 
@@ -206,11 +212,30 @@ server/data/
 - **批注坐标是归一化值（0~1）**，原点在图片左上角，因此任何显示尺寸下都能精确还原。
   - 点批注只使用 `(x, y)`；
   - 矩形批注的 `(x, y)` 是**拖拽起点**（序号图标位置），`(w, h)` 是**带符号**的跨度 —— 向左上拖动时为负。矩形范围 = `min(x, x+w)` 起、`|w| × |h|` 大小。前端据此把序号画在起点上。
+- **批注颜色 `color` 存 `#rrggbb` 小写**，统一由 `services/annotations.py` 的 `normalize_color()` 归一化。
+  - **空串是有意义的值**：表示「未指定颜色」，由前端回落到默认强调色。因此不能用空串去顶替 `None` 做「未提供」的判定。
+  - 好处是**老数据无需回填**：加这一列之前的批注自动取默认值 `''`，前端照常渲染成默认色。
+  - 接口层用 `COLOR_PATTERN` 校验格式，非法值直接 422。
 - **`seq` 在同一图集内跨所有图片统一编号**，从 1 开始连续。新增时取全册 `MAX(seq) + 1`；删除后调用 `_compact_sequence()` 重新压实，不留空洞。
 - 外键开启 `ON DELETE CASCADE`，删图集 / 删图片时批注自动清理；磁盘文件由服务层显式删除。
 - 连接按请求创建（FastAPI 的同步接口跑在线程池里），开启 WAL 后并发读写不互相阻塞。
 
-### 3. 图片处理
+### 3. 表结构变更（轻量迁移）
+
+表结构的唯一事实来源是 `core/db.py` 的 `SCHEMA` 常量，但 `CREATE TABLE IF NOT EXISTS` **不会**给已存在的表补列。因此 `init_db()` 里还有一步 `_migrate()`：按 `_ADDED_COLUMNS` 声明的「缺哪列补哪列」做幂等 `ALTER TABLE`。
+
+新增列时只要两步：**① 改 `SCHEMA`（新库直接建出来）；② 在 `_ADDED_COLUMNS` 里登记（老库自动补上）**。
+
+```python
+_ADDED_COLUMNS = {
+    "annotations": {"color": "TEXT NOT NULL DEFAULT ''"},
+}
+```
+
+> 列还很少，一个几十行的函数就够了，暂时不引入 Alembic 之类的迁移框架。等出现「需要改列类型 / 数据回填」的诉求时再升级。
+> 迁移逻辑有专门的测试：`tests/test_db_migration.py` 会先造一个「加列之前」的旧库，再验证补列成功、老数据完好、且重复执行不出错。
+
+### 4. 图片处理
 
 - 原图**按上传字节原样保存**，不做二次编码，避免画质损失；
 - 缩略图统一转 WebP（Pillow 构建不带 WebP 编码器时自动退回 JPEG），透明区域铺白底；
@@ -246,9 +271,18 @@ server/data/
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/albums/{id}/annotations` | 新增批注，序号由服务端分配（不接受客户端传入） |
-| PATCH | `/annotations/{id}` | 修改文字说明或几何位置 |
+| POST | `/albums/{id}/annotations` | 新增批注，序号由服务端分配（不接受客户端传入）。可带 `color` |
+| PATCH | `/annotations/{id}` | 修改文字说明、颜色或几何位置 |
 | DELETE | `/annotations/{id}` | 删除批注并重排全册序号 |
+
+### UI 偏好
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/preferences/annotation-colors` | 批注调色板的「最近使用颜色」，最近用过的排在最前 |
+| POST | `/preferences/annotation-colors` | 记录一次颜色使用：去重、排到最前、上限 12 个 |
+
+> 偏好类接口放在 `/preferences` 下，与业务数据分开 —— 它们描述的是「界面怎么显示」，不是「记录了什么」。`preferences` 表是通用键值表，后续要加别的 UI 偏好（如默认批注类型、列表排序方式）直接加 key 即可。
 
 ---
 
@@ -274,6 +308,8 @@ uv run ruff check .        # 静态检查
 uv run ruff check --fix .  # 自动修复
 uv run ruff format .       # 格式化
 ```
+
+> 想一次性把后端和前端都拉起来，双击仓库根目录的 `start_dev.cmd` 即可（内部就是这里的 `uv run tradinglog-server`，并默认带上 `RELOAD=true`）。
 
 启动后：
 
@@ -331,6 +367,7 @@ server: {
 后端的 `Settings.cors_origins` 默认也放行了 `http://localhost:5173`，因此即使不走代理、直接跨域请求也能通。生产环境由 Nginx 等网关承担同样的转发职责。
 
 联调步骤：先 `uv run tradinglog-server` 起后端，再在仓库根目录 `npm run dev` 起前端，浏览器访问 http://localhost:5173 。
+（两步合一：直接双击仓库根目录的 `start_dev.cmd`。）
 
 ---
 

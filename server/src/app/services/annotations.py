@@ -30,6 +30,15 @@ def get_annotation(annotation_id: str) -> dict:
     return dict(row)
 
 
+def normalize_color(value: str | None) -> str:
+    """颜色统一存小写。
+
+    空串是有意义的值 —— 表示「未指定颜色」，前端会回落到默认强调色，
+    因此这里不能用空串去顶替 None 做「未提供」的判定。
+    """
+    return (value or "").strip().lower()
+
+
 def create_annotation(album_id: str, payload: AnnotationCreate) -> dict:
     # 图片必须存在，且确实属于这个图集
     with get_conn() as conn:
@@ -50,8 +59,8 @@ def create_annotation(album_id: str, payload: AnnotationCreate) -> dict:
         conn.execute(
             """
             INSERT INTO annotations
-                (id, album_id, image_id, kind, seq, x, y, w, h, text, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, album_id, image_id, kind, seq, x, y, w, h, text, color, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 annotation_id,
@@ -65,6 +74,7 @@ def create_annotation(album_id: str, payload: AnnotationCreate) -> dict:
                 payload.w if payload.kind == "rect" else 0.0,
                 payload.h if payload.kind == "rect" else 0.0,
                 payload.text.strip(),
+                normalize_color(payload.color),
                 now_iso(),
             ),
         )
@@ -80,6 +90,8 @@ def update_annotation(annotation_id: str, payload: AnnotationUpdate) -> dict:
 
     if "text" in changes:
         changes["text"] = changes["text"].strip()
+    if "color" in changes:
+        changes["color"] = normalize_color(changes["color"])
     # 点批注没有矩形，避免写入无意义的宽高
     if existing["kind"] == "point":
         changes.pop("w", None)
