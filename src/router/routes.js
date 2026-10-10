@@ -3,6 +3,8 @@
  * - 业务页面统一挂在 MainLayout 之下，共享侧边栏 / 顶栏
  * - 组件统一使用动态 import 做路由级懒加载
  * - meta.title 会被路由守卫用于设置 document.title
+ * - meta.activeMenu 用于「详情页高亮父级菜单」（如 /albums/:id 高亮 /albums）
+ * - meta.parent 用于在顶栏生成返回上级的面包屑
  *
  * 新增页面：
  *   1) 在 src/views/ 下创建组件
@@ -23,6 +25,23 @@ export const routes = [
         component: () => import('@/views/HomeView.vue'),
         meta: { title: '首页' },
       },
+      {
+        path: 'albums',
+        name: 'Albums',
+        component: () => import('@/views/AlbumsView.vue'),
+        meta: { title: '交易相册' },
+      },
+      {
+        // 详情页不单独占菜单项，靠 activeMenu 让父级菜单保持高亮
+        path: 'albums/:albumId',
+        name: 'AlbumDetail',
+        component: () => import('@/views/AlbumDetailView.vue'),
+        meta: {
+          title: '图集详情',
+          activeMenu: '/albums',
+          parent: { title: '交易相册', path: '/albums' },
+        },
+      },
     ],
   },
 
@@ -36,4 +55,7 @@ export const routes = [
 ]
 
 /** 供侧边栏菜单使用的导航配置（与 routes 中的 children 保持一致） */
-export const menuRoutes = [{ key: '/home', label: '首页', icon: 'dashboard' }]
+export const menuRoutes = [
+  { key: '/home', label: '首页', icon: 'dashboard' },
+  { key: '/albums', label: '交易相册', icon: 'album' },
+]

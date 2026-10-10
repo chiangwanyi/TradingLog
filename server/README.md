@@ -1,6 +1,6 @@
 # TradingLog Server
 
-TradingLog 的后端服务，基于 **FastAPI + uv** 构建。
+TradingLog 的后端服务，基于 **FastAPI + uv** 构建，为「交易截图相册」等模块提供 REST API。
 
 ---
 
@@ -31,31 +31,52 @@ server/
 ├─ pyproject.toml           # 项目元数据 + 依赖声明 + 工具配置（唯一配置入口）
 ├─ uv.lock                  # 依赖锁文件，保证可复现安装（需提交到版本库）
 ├─ README.md
+├─ data/                    # 运行期数据（已 gitignore，用户数据不提交）
+│  ├─ tradinglog.db         #   SQLite 库
+│  └─ uploads/<album_id>/   #   截图原图与缩略图
 ├─ src/
 │  └─ app/                  # 应用包，导入路径即 app.xxx
 │     ├─ __init__.py        # 包元信息（__version__）
 │     ├─ __main__.py        # 命令行入口：python -m app / uv run tradinglog-server
-│     ├─ main.py            # 应用工厂 create_app() 与 ASGI 实例 app
+│     ├─ main.py            # 应用工厂 create_app()、lifespan、异常处理器
 │     ├─ core/
-│     │  └─ config.py       # 基于 pydantic-settings 的配置中心
-│     └─ api/
-│        └─ v1/
-│           ├─ router.py    # v1 路由汇总，新增模块在这里注册
-│           └─ endpoints/
-│              └─ health.py # 健康检查（唯一的示例接口）
+│     │  ├─ config.py       # 基于 pydantic-settings 的配置中心
+│     │  ├─ db.py           # SQLite 连接与建表（三张表的 schema 集中在此）
+│     │  └─ errors.py       # 领域异常（NotFound / Validation）
+│     ├─ schemas/           # Pydantic 请求 / 响应模型
+│     │  ├─ album.py
+│     │  ├─ image.py
+│     │  └─ annotation.py
+│     ├─ services/          # 业务逻辑（不依赖 FastAPI，可单独测试）
+│     │  ├─ albums.py       #   图集 CRUD
+│     │  ├─ images.py       #   图片落盘、缩略图生成、元数据
+│     │  ├─ annotations.py  #   批注 CRUD 与序号压实
+│     │  └─ common.py       #   now_iso / truncate_to_minute 等
+│     ├─ api/
+│     │  └─ v1/
+│     │     ├─ router.py    # v1 路由汇总，新增模块在这里注册
+│     │     └─ endpoints/
+│     │        ├─ health.py       # 健康检查
+│     │        ├─ albums.py       # 图集接口 + 图片上传
+│     │        ├─ images.py       # 原图 / 缩略图读取、图片删除
+│     │        └─ annotations.py  # 批注接口
 └─ tests/
-   ├─ conftest.py           # pytest 共享夹具（TestClient）
-   └─ test_health.py        # 健康检查冒烟测试
+   ├─ conftest.py           # pytest 共享夹具（隔离的临时数据目录）
+   ├─ test_health.py        # 健康检查冒烟测试
+   └─ test_albums.py        # 相册全链路测试
 ```
 
 **分层约定：**
 
 | 层 | 位置 | 职责 |
 | --- | --- | --- |
-| 入口 | `main.py` | 创建 FastAPI 实例、挂中间件、挂路由 |
+| 入口 | `main.py` | 创建 FastAPI 实例、挂中间件、注册异常处理器与路由 |
 | 配置 | `core/config.py` | 所有可配置项集中在此，避免散落的硬编码 |
+| 存储 | `core/db.py` | 连接管理 + 表结构；不做业务读写 |
+| 模型 | `schemas/` | 请求体 / 响应体的校验与序列化 |
+| 业务 | `services/` | 纯业务逻辑，抛领域异常（`core/errors.py`），不 import FastAPI |
 | 路由 | `api/v1/router.py` | 汇总各业务模块的路由，统一挂到 `/api/v1` |
-| 接口 | `api/v1/endpoints/*.py` | 单个业务模块的 HTTP 实现 |
+| 接口 | `api/v1/endpoints/*.py` | HTTP 层：解析入参、调用 service、返回模型 |
 | 测试 | `tests/` | 与 `src/` 平级，避免被打包进产物 |
 
 > 采用 **src-layout**（源码在 `src/` 下），这是 uv 初始化应用项目时的默认布局。好处是 `import app` 一定来自已安装的包，不会因为恰好存在同名目录而误导入。
@@ -84,6 +105,7 @@ uv init server --app --name tradinglog-server --python 3.13 --managed-python --v
 # 2) 添加运行时依赖
 cd server
 uv add fastapi "uvicorn[standard]" pydantic-settings
+uv add python-multipart pillow      # 文件上传解析 + 图片尺寸读取与缩略图
 
 # 3) 添加开发依赖（写入 [dependency-groups].dev）
 uv add --dev pytest httpx2 ruff
@@ -100,6 +122,8 @@ module-name = "app"
 module-root = "src"
 ```
 
+> **注意**：测试客户端用的是 `httpx2` 而不是 `httpx`。starlette ≥ 1.7 起 `starlette.testclient` 已弃用 `httpx`，继续使用会在测试输出里刷 `StarletteDeprecationWarning`。
+
 ---
 
 ## 五、依赖管理方式
@@ -113,7 +137,9 @@ module-root = "src"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.143.0",
+    "pillow>=12.3.0",           # 读取图片尺寸、生成缩略图
     "pydantic-settings>=2.15.0",
+    "python-multipart>=0.0.32", # FastAPI 的 UploadFile 依赖它解析表单
     "uvicorn[standard]>=0.54.0",
 ]
 
@@ -150,7 +176,83 @@ dev = [
 
 ---
 
-## 六、常用命令
+## 六、数据存储
+
+### 1. 存放位置
+
+全部运行期数据都在 `server/data/` 下（已加入 `.gitignore`，不会误提交）：
+
+```
+server/data/
+├─ tradinglog.db                     # SQLite 库（元数据）
+└─ uploads/<album_id>/
+   ├─ <image_id>.<ext>               # 原图
+   └─ <image_id>.thumb.webp          # 预览缩略图（最长边 480px）
+```
+
+可通过 `.env` 的 `DATA_DIR` 改到别处（例如放到独立的数据盘）。
+
+### 2. 表结构
+
+| 表 | 关键字段 | 说明 |
+| --- | --- | --- |
+| `albums` | `id`, `symbol`, `trade_time`, `title`, `note`, `created_at`, `updated_at` | 图集。`trade_time` 精确到分钟，列表按它倒序 |
+| `images` | `id`, `album_id`, `original_name`, `stored_name`, `thumb_name`, `mime`, `size`, `width`, `height`, `created_at` | 图片。按 `created_at` 升序即上传顺序 |
+| `annotations` | `id`, `album_id`, `image_id`, `kind`, `seq`, `x`, `y`, `w`, `h`, `text`, `created_at` | 批注 |
+
+设计要点：
+
+- **时间统一以 ISO 8601 字符串存储**，字典序即时间序，`ORDER BY` 可直接生效。约定使用**不带时区的本地时间**，前后端都不会有时区偏移。
+- **批注坐标是归一化值（0~1）**，原点在图片左上角，因此任何显示尺寸下都能精确还原。
+  - 点批注只使用 `(x, y)`；
+  - 矩形批注的 `(x, y)` 是**拖拽起点**（序号图标位置），`(w, h)` 是**带符号**的跨度 —— 向左上拖动时为负。矩形范围 = `min(x, x+w)` 起、`|w| × |h|` 大小。前端据此把序号画在起点上。
+- **`seq` 在同一图集内跨所有图片统一编号**，从 1 开始连续。新增时取全册 `MAX(seq) + 1`；删除后调用 `_compact_sequence()` 重新压实，不留空洞。
+- 外键开启 `ON DELETE CASCADE`，删图集 / 删图片时批注自动清理；磁盘文件由服务层显式删除。
+- 连接按请求创建（FastAPI 的同步接口跑在线程池里），开启 WAL 后并发读写不互相阻塞。
+
+### 3. 图片处理
+
+- 原图**按上传字节原样保存**，不做二次编码，避免画质损失；
+- 缩略图统一转 WebP（Pillow 构建不带 WebP 编码器时自动退回 JPEG），透明区域铺白底；
+- 读取尺寸时先做 `ImageOps.exif_transpose`，**以「旋转后」的尺寸为准** —— 与浏览器渲染原图时的显示尺寸一致，批注坐标才不会错位；
+- 上传时校验真实图片格式（Pillow 解析而非只看扩展名）与体积上限，单个文件失败不影响同批其它文件。
+
+---
+
+## 七、接口一览
+
+所有接口挂在 `/api/v1` 下，交互文档见 http://127.0.0.1:8000/docs 。
+
+### 图集
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/albums` | 图集列表，按交易时间倒序，附带图片数与封面地址 |
+| POST | `/albums` | 新建图集（`symbol` + `trade_time` 必填） |
+| GET | `/albums/{id}` | 图集详情，**一次返回全部图片及其批注**（前端只需一次请求） |
+| PATCH | `/albums/{id}` | 修改图集信息 |
+| DELETE | `/albums/{id}` | 删除图集（连同图片文件、图片记录与批注） |
+
+### 图片
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/albums/{id}/images` | 上传图片，multipart 字段名 `files`，可多张。返回 `{ saved: [...], failed: [{name, reason}] }` |
+| GET | `/images/{id}/file` | 读取原图（长缓存） |
+| GET | `/images/{id}/thumb` | 读取缩略图，缺缩略图时自动回退原图 |
+| DELETE | `/images/{id}` | 删除图片，连同其批注，并重排该图集序号 |
+
+### 批注
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/albums/{id}/annotations` | 新增批注，序号由服务端分配（不接受客户端传入） |
+| PATCH | `/annotations/{id}` | 修改文字说明或几何位置 |
+| DELETE | `/annotations/{id}` | 删除批注并重排全册序号 |
+
+---
+
+## 八、常用命令
 
 ```bash
 cd server
@@ -163,9 +265,9 @@ uv run tradinglog-server
 uv run python -m app
 
 # 测试
-uv run pytest              # 全量
+uv run pytest              # 全量（会自动使用临时数据目录，不污染 server/data）
 uv run pytest -v           # 详细输出
-uv run pytest tests/test_health.py::test_health
+uv run pytest tests/test_albums.py::test_annotation_seq_is_shared_across_images
 
 # 代码检查与格式化
 uv run ruff check .        # 静态检查
@@ -181,7 +283,7 @@ uv run ruff format .       # 格式化
 
 ---
 
-## 七、配置方式
+## 九、配置方式
 
 配置由 `src/app/core/config.py` 中的 `Settings` 统一管理（基于 `pydantic-settings`），读取优先级为：
 
@@ -191,58 +293,70 @@ uv run ruff format .       # 格式化
 cp .env.example .env   # 按需修改；.env 已在 .gitignore 中忽略
 ```
 
-可配置项见 `.env.example`，包括 `APP_NAME`、`DEBUG`、`HOST`、`PORT`、`RELOAD`、`API_V1_PREFIX`、`CORS_ORIGINS`。
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `APP_NAME` / `APP_VERSION` | TradingLog API / 0.1.0 | 应用元信息 |
+| `DEBUG` | `false` | 调试模式 |
+| `HOST` / `PORT` / `RELOAD` | 127.0.0.1 / 8000 / false | 服务监听（`uv run tradinglog-server` 读取） |
+| `API_V1_PREFIX` | `/api/v1` | 路由前缀 |
+| `CORS_ORIGINS` | `["http://localhost:5173", ...]` | 跨域白名单（JSON 数组格式） |
+| `DATA_DIR` | `server/data` | 数据根目录（SQLite 库 + 截图） |
+| `MAX_IMAGE_BYTES` | `20971520`（20MB） | 单张图片体积上限 |
+| `THUMBNAIL_MAX_SIDE` | `480` | 缩略图最长边（像素） |
 
 新增配置项时，在 `Settings` 中加一个带默认值的字段即可：
 
 ```python
 class Settings(BaseSettings):
-    database_url: str = "sqlite:///./tradinglog.db"
+    retention_days: int = 365
 ```
 
-随后即可通过环境变量 `DATABASE_URL` 或 `.env` 覆盖。
+随后即可通过环境变量 `RETENTION_DAYS` 或 `.env` 覆盖。
 
 ---
 
-## 八、与前端联调
+## 十、与前端联调
 
-后端通过 `Settings.cors_origins` 中配置的来源处理跨域（默认已包含 `http://localhost:5173`）。
-
-如果希望前端用相对路径 `/api` 请求、避免写死后端域名，可在前端根目录的 `vite.config.js` 中加一段代理：
+前端已在 `vite.config.js` 中配好代理，前端代码统一用相对路径 `/api/...` 请求，**开发时无需处理跨域**：
 
 ```js
-export default defineConfig({
-  server: {
-    port: 5173,
-    proxy: {
-      '/api': {
-        target: 'http://127.0.0.1:8000',
-        changeOrigin: true,
-      },
-    },
+server: {
+  port: 5173,
+  proxy: {
+    '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
   },
-})
+},
 ```
 
-这样前端请求 `/api/v1/health` 会被转发到后端；生产环境再由 Nginx 等网关承担同样的转发职责。
+后端的 `Settings.cors_origins` 默认也放行了 `http://localhost:5173`，因此即使不走代理、直接跨域请求也能通。生产环境由 Nginx 等网关承担同样的转发职责。
+
+联调步骤：先 `uv run tradinglog-server` 起后端，再在仓库根目录 `npm run dev` 起前端，浏览器访问 http://localhost:5173 。
 
 ---
 
-## 九、新增一个接口的步骤
+## 十一、新增一个接口的步骤
 
-1. 在 `src/app/api/v1/endpoints/` 下新建模块，例如 `trades.py`：
+以新增 `trades` 模块为例：
+
+1. **模型**：在 `src/app/schemas/trade.py` 定义 Pydantic 模型；
+2. **业务**：在 `src/app/services/trades.py` 写业务逻辑，只抛 `NotFoundError` / `ValidationError`，不要 import FastAPI；
+3. **接口**：在 `src/app/api/v1/endpoints/trades.py` 定义 `router`：
 
    ```python
    from fastapi import APIRouter
 
+   from app.schemas.trade import TradeRead
+   from app.services import trades as trade_service
+
    router = APIRouter(prefix="/trades", tags=["trades"])
 
-   @router.get("")
+
+   @router.get("", response_model=list[TradeRead], summary="交易列表")
    def list_trades() -> list[dict]:
-       return []
+       return trade_service.list_trades()
    ```
 
-2. 在 `src/app/api/v1/router.py` 中注册 `api_router.include_router(trades.router)`；
-3. 在 `tests/` 下补对应测试。
+4. **注册**：在 `src/app/api/v1/router.py` 中 `api_router.include_router(trades.router)`；
+5. **测试**：在 `tests/` 下补对应测试（用 `client` 夹具即可，数据目录已隔离）。
 
-如需请求体/响应体的数据校验，建议新增 `src/app/schemas/` 存放 Pydantic 模型；如需数据库，建议新增 `src/app/models/` 与 `src/app/crud/`，并在 `core/config.py` 中补 `database_url` 配置项。
+领域异常已在 `main.py` 注册好处理器：`NotFoundError → 404`、`ValidationError → 400`，服务层直接抛即可。

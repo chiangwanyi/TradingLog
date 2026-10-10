@@ -81,6 +81,36 @@ body,
   opacity: 0.65;
 }
 
+/* --------------------------------- 主题变量 -------------------------------- */
+/* 自带一套语义变量，供业务样式使用，不去依赖 Naive UI 的内部 CSS 变量命名 */
+
+:root,
+html[data-theme='light'] {
+  --brand-primary: #2f6fed;
+  --tl-board: #e8ebf1;
+  --tl-surface: #ffffff;
+  --tl-surface-border: #e2e4ea;
+  --tl-text-muted: #8a8f99;
+  --tl-text-dim: #5c6270;
+}
+
+html[data-theme='dark'] {
+  --brand-primary: #558cff;
+  --tl-board: #0c0c0f;
+  --tl-surface: #23232a;
+  --tl-surface-border: #3a3a44;
+  --tl-text-muted: #9aa0ac;
+  --tl-text-dim: #b6bcc8;
+}
+
+/* 批注配色：直接叠在截图之上，因此不随深浅主题变化，保证在浅底/深底K线图上都足够醒目 */
+:root {
+  --anno-accent: #f59e0b;
+  --anno-accent-soft: rgba(245, 158, 11, 0.2);
+  --anno-accent-soft-strong: rgba(245, 158, 11, 0.34);
+  --anno-accent-ring: rgba(245, 158, 11, 0.45);
+}
+
 /* --------------------------------- 滚动条美化 -------------------------------- */
 ::-webkit-scrollbar {
   width: 8px;

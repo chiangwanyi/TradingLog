@@ -3,7 +3,13 @@ import { computed, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores'
 import { menuRoutes } from '@/router/routes'
-import { IconDashboard, IconMenu, IconMoon, IconSun } from '@/components/icons'
+import {
+  IconAlbum,
+  IconDashboard,
+  IconMenu,
+  IconMoon,
+  IconSun,
+} from '@/components/icons'
 
 defineOptions({ name: 'MainLayout' })
 
@@ -14,6 +20,7 @@ const appStore = useAppStore()
 /** 图标名 -> 组件映射，便于用配置驱动菜单 */
 const iconMap = {
   dashboard: IconDashboard,
+  album: IconAlbum,
 }
 
 /** NMenu 的 options 结构 */
@@ -23,8 +30,11 @@ const menuOptions = menuRoutes.map((item) => ({
   icon: () => h(iconMap[item.icon] ?? IconDashboard),
 }))
 
-/** 当前高亮项与路由保持一致 */
-const activeKey = computed(() => route.path)
+/** 当前高亮项与路由保持一致；详情页用 meta.activeMenu 指回父级菜单 */
+const activeKey = computed(() => route.meta?.activeMenu ?? route.path)
+
+/** 详情页在面包屑前插一条可点击的父级 */
+const parent = computed(() => route.meta?.parent ?? null)
 
 function handleMenuSelect(key) {
   if (key !== route.path) router.push(key)
@@ -73,6 +83,9 @@ function handleMenuSelect(key) {
           </n-button>
 
           <n-breadcrumb>
+            <n-breadcrumb-item v-if="parent" @click="router.push(parent.path)">
+              <span class="app-breadcrumb__link">{{ parent.title }}</span>
+            </n-breadcrumb-item>
             <n-breadcrumb-item>{{ route.meta?.title ?? '页面' }}</n-breadcrumb-item>
           </n-breadcrumb>
         </div>
@@ -149,5 +162,14 @@ function handleMenuSelect(key) {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.app-breadcrumb__link {
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.app-breadcrumb__link:hover {
+  color: var(--brand-primary);
 }
 </style>

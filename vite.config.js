@@ -50,6 +50,16 @@ export default defineConfig({
     port: 5173,
     // 如需启动后自动打开浏览器，把下一行改为 open: true
     open: false,
+    /**
+     * 开发代理：前端统一以 /api 开头请求，由 Vite 转发到本机 FastAPI 服务。
+     * 这样浏览器眼里是同源请求，既不用处理跨域，生产环境换个网关也不会改前端代码。
+     */
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+    },
   },
 
   build: {

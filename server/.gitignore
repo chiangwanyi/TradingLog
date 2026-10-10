@@ -21,3 +21,6 @@ htmlcov/
 .env
 .env.*
 !.env.example
+
+# ---- 运行期数据：SQLite 库与截图原图（用户数据，不入库）----
+data/
