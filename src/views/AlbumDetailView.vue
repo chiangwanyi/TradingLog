@@ -53,6 +53,16 @@ const fileInputRef = ref(null)
 const dragDepth = ref(0)
 const dragging = computed(() => dragDepth.value > 0)
 
+/**
+ * 统一图片对象的结构。
+ * 图片可能来自「图集详情」或「上传接口」，两者的 `annotations` 字段必须都存在 ——
+ * 否则追加图片后立刻画批注时，`image.annotations.push(...)` 会抛
+ * `Cannot read properties of undefined (reading 'push')`。
+ */
+function normalizeImage(image) {
+  return { ...image, annotations: Array.isArray(image.annotations) ? image.annotations : [] }
+}
+
 // ---------------------------------------------------------------- 派生数据
 
 const images = computed(() => album.value?.images ?? [])
@@ -83,7 +93,9 @@ const annotationList = computed(() =>
 async function load() {
   loading.value = true
   try {
-    album.value = await albumApi.fetchAlbum(albumId.value)
+    const detail = await albumApi.fetchAlbum(albumId.value)
+    // 归一化一次，后续所有局部更新都建立在「images[].annotations 一定存在」之上
+    album.value = { ...detail, images: (detail.images ?? []).map(normalizeImage) }
     if (currentIndex.value > images.value.length - 1) {
       currentIndex.value = Math.max(0, images.value.length - 1)
     }
@@ -152,8 +164,10 @@ async function upload(fileList) {
     const firstNewIndex = images.value.length
 
     if (result.saved.length) {
-      // 新图片的上传时间必然晚于已有图片，直接追加即可维持「按上传时间排序」
-      images.value.push(...result.saved)
+      // 新图片的上传时间必然晚于已有图片，直接追加即可维持「按上传时间排序」。
+      // 归一化 annotations：后端返回的图片对象必须与图集详情里的结构一致，
+      // 这里再兜一次底，避免字段缺失导致后续 push 批注时抛 undefined。
+      images.value.push(...result.saved.map(normalizeImage))
       album.value.image_count = images.value.length
       currentIndex.value = firstNewIndex
       selectedId.value = null
@@ -244,13 +258,18 @@ function findAnnotation(id) {
 }
 
 async function handleCreate(payload) {
-  if (!currentImage.value) return
+  const image = currentImage.value
+  if (!image) return
   try {
     const created = await albumApi.createAnnotation(albumId.value, {
-      image_id: currentImage.value.id,
+      image_id: image.id,
       ...payload,
     })
-    currentImage.value.annotations.push(created)
+    // 按 id 重新定位：等待接口返回期间用户可能已经切换了图片
+    const target = images.value.find((item) => item.id === image.id)
+    if (!target) return
+    if (!Array.isArray(target.annotations)) target.annotations = []
+    target.annotations.push(created)
     // 选中新批注，ImageStage 会随即弹出说明编辑框
     selectedId.value = created.id
   } catch (error) {

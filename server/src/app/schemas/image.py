@@ -40,5 +40,13 @@ class UploadFailure(BaseModel):
 
 
 class ImageUploadResult(BaseModel):
-    saved: list[ImageRead] = []
+    """上传结果。
+
+    `saved` 用 ImageDetail 而非 ImageRead：前端会把上传返回的图片直接追加到
+    图集的图片列表里，必须与 GET /albums/{id} 的结构一致（带 annotations 字段），
+    否则新图片的 annotations 为 undefined，紧接着添加批注时就会崩。
+    新上传的图片必然还没有批注，所以这里恒为空数组。
+    """
+
+    saved: list[ImageDetail] = []
     failed: list[UploadFailure] = []

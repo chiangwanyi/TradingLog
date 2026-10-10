@@ -95,6 +95,34 @@ def test_upload_images_and_serve_them(client: TestClient) -> None:
     assert listed["cover_image_id"] == result["saved"][0]["id"]
 
 
+def test_upload_response_matches_album_detail_image_shape(client: TestClient) -> None:
+    """回归：上传接口返回的图片结构必须与图集详情里的完全一致。
+
+    前端会把上传返回的图片直接 push 进图集的图片列表，之后在这张图上画批注时
+    会执行 `image.annotations.push(...)`。早期上传接口返回的是不含 annotations
+    的 ImageRead，导致新上传的图片一画批注就抛
+    `Cannot read properties of undefined (reading 'push')`（刷新后才正常）。
+    """
+    album = create_album(client)
+    saved = upload(client, album["id"], ["1.png"])["saved"][0]
+
+    # 新图片必然还没有批注，但字段本身必须存在
+    assert saved["annotations"] == []
+
+    detail_image = client.get(f"{API}/albums/{album['id']}").json()["images"][0]
+    assert set(saved) == set(detail_image)
+
+    # 紧接着画批注应当成功，并且出现在详情里
+    created = client.post(
+        f"{API}/albums/{album['id']}/annotations",
+        json={"image_id": saved["id"], "kind": "point", "x": 0.3, "y": 0.4},
+    )
+    assert created.status_code == 201
+
+    refreshed = client.get(f"{API}/albums/{album['id']}").json()["images"][0]["annotations"]
+    assert [item["id"] for item in refreshed] == [created.json()["id"]]
+
+
 def test_upload_rejects_non_image_without_breaking_batch(client: TestClient) -> None:
     album = create_album(client)
     files = [
