@@ -54,7 +54,9 @@
 
 - Vue 3.5 + Vite 8 + Vue Router 5 + Pinia 4 + Naive UI 2.45，**纯 JavaScript**（不使用 TypeScript）。
 - 包管理器 npm；Node 要求 `^20.19.0 || >=22.12.0`。
-- 路径别名：`@` -> `src`（vite `resolve.alias` + `jsconfig.json` `paths`）。
+- 路径别名：`@` -> `src`（vite `resolve.alias` + `jsconfig.json` 的 `paths`）。
+  - **`jsconfig.json` 里不要写 `baseUrl`**：TS 6 起已弃用、7.0 将停止运行。`paths` 直接写相对配置文件所在目录的路径：`"@/*": ["./src/*"]`。已用 TS 7.0.2 实测 `--noEmit` 零错误且别名解析正常。
+  - 本工程**不装本地 typescript**，编辑器提示由 VSCode 内置 TS 提供；因此这类配置问题不需要动 `package.json`。
 - 目录约定：
   - 路由表与侧边栏菜单**同源**于 `src/router/routes.js`（`routes` 的 children + `menuRoutes`）。
   - Store 放 `src/stores/*.js`，从 `src/stores/index.js` 统一导出。

@@ -3,9 +3,9 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "baseUrl": ".",
+    // TS 6 起 baseUrl 已废弃：paths 直接写相对本文件所在目录的路径即可
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
     "jsx": "preserve",
     "checkJs": false,
