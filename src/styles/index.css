@@ -1,0 +1,101 @@
+/* ==========================================================================
+   全局基础样式
+   Naive UI 在运行时通过 CSS-in-JS 注入组件样式，这里只负责重置与通用工具类
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 主题切换时的整体过渡，避免生硬闪变 */
+body,
+.n-layout,
+.n-card {
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* ---------------------------------- 路由过渡 --------------------------------- */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* --------------------------------- 页面通用类 -------------------------------- */
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.page__head {
+  margin-bottom: 18px;
+}
+
+.page__title {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+
+.page__desc {
+  margin: 0;
+  font-size: 13px;
+  opacity: 0.65;
+}
+
+/* --------------------------------- 滚动条美化 -------------------------------- */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: rgba(128, 128, 128, 0.32);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.5);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
